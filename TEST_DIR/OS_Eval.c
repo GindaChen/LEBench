@@ -3,6 +3,9 @@
 #include <time.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <libgen.h>
+#include <dirent.h>
+#include <sys/resource.h>
 #include <time.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -25,6 +28,35 @@
 #include <sys/time.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+
+
+/*******************************************/
+// ASCII Art for Debugging
+// Reset: \e[0m 
+// Yellow Font: \e[0;33m 
+// Green Font: \e[0;32m
+// Blue Font: \e[0;34m
+#define debug(...) {printf("\e[0;33m[DEBUG] [%s::%d] ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\e[0m \n");};
+
+#define info(...) {printf("\e[0;32m[INFO] [%s::%d] ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\e[0m \n");};
+
+#define checkpoint(...) {printf("\e[0;35m[CHECK] [%s::%d] ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\e[0m \n");};
+
+void usage(){
+	printf("Usage:\n");
+	printf(" LEBENCH_DIR=/LEBench/ PATH=/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin /LEBench/TEST_DIR/OS_Eval 0 4.12.0-custom\n");
+	printf(" LEBENCH_DIR=/LEBench/ PATH=/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin /LEBench/TEST_DIR/OS_Eval 0 4.4.0-generic\n");
+}
+
+void quit(){
+	
+}
+
+#define quit() {printf("\e[0;36m[EXIT] [%s::%d] ====== Reached the end of debug ======\e[0m\n", __FILE__, __LINE__); exit(1);}
+
+#define except(...) {printf("\e[0;31m[ERROR][%s::%d]", __FILE__, __LINE__); perror(""); printf(__VA_ARGS__); printf("\e[0m \n"); exit(1);};
+
+/*******************************************/
 
 int counter=3;
 bool  isFirstIteration = false;
@@ -233,16 +265,27 @@ void one_line_test(FILE *fp, FILE *copy, void (*f)(struct timespec*), testInfo *
 	struct timespec testStart, testEnd;
 	clock_gettime(CLOCK_MONOTONIC,&testStart);
 
-	printf("Performing test %s.\n", info->name);
+	info("Performing test %s.\n", info->name);
 
 	int runs = info->iter;
-	printf("Total test iteration %d.\n", runs);
+	info("Total test iteration %d.\n", runs);
 
 	struct timespec* timeArray = (struct timespec *)malloc(sizeof(struct timespec) * runs);
+	
+	double bound = 0.1;
 	for (int i=0; i < runs; i++) {
 		timeArray[i].tv_sec = 0;
 		timeArray[i].tv_nsec = 0;
 		(*f)(&timeArray[i]);
+
+		if (i == 0){
+			info("[%s] Sample time: %ld",info->name, timeArray[i].tv_sec);
+		}
+		if((i / runs) > bound){
+			info("[%s] %d/%d Iteration done...", info->name, i, runs);
+			info("[%s] Sample time: %ld",info->name, timeArray[i].tv_sec);
+			bound = bound + 0.1;
+		}
 	}
 	struct timespec *sum = calc_sum2(timeArray, runs);
 	struct timespec *average = calc_average(sum, runs);  
@@ -453,20 +496,22 @@ void forkTest(struct timespec *childTime, struct timespec *parentTime)
     clock_gettime(CLOCK_MONOTONIC,&timeA);
 
     int forkId = fork();
+
     if (forkId == 0){
         clock_gettime(CLOCK_MONOTONIC, timeB);
         kill(getpid(),SIGINT);
-	printf("[error] unable to kill child process\n");
-	return;
+		except("[error] unable to kill child process\n");
+		return;
     } else if (forkId > 0){
         clock_gettime(CLOCK_MONOTONIC,&timeC);
         wait(&status);
-	add_diff_to_sum(childTime,*timeB,timeA);
-	add_diff_to_sum(parentTime,timeC,timeA);
+		add_diff_to_sum(childTime, *timeB, timeA);
+		add_diff_to_sum(parentTime, timeC, timeA);
     } else {
-    	printf("[error] fork failed.\n");
+		perror("[error] fork failed.");
     }
-    munmap(timeB, sizeof(struct timespec));
+    
+	munmap(timeB, sizeof(struct timespec));
     return;
 }
 
@@ -512,7 +557,7 @@ void read_test(struct timespec *diffTime) {
 	struct timespec startTime, endTime;
 	char *buf_in = (char *) malloc (sizeof(char) * file_size);
 
-	int fd =open("test_file.txt", O_RDONLY);
+	int fd = open("test_file.txt", O_RDONLY);
 	if (fd < 0) printf("invalid fd in read: %d\n", fd);
 	clock_gettime(CLOCK_MONOTONIC, &startTime);
 	syscall(SYS_read, fd, buf_in, file_size);
@@ -603,9 +648,13 @@ void page_fault_test(struct timespec *diffTime) {
 	char a = *((char *)addr);
 	clock_gettime(CLOCK_MONOTONIC,&endTime);
 	
-	printf("read: %c\n", a);
+	// printf("read: %c\n", a);
+	if (a != 'a'){
+		debug("Read %c != 'a'", a);
+	}
 	syscall(SYS_munmap, addr, file_size);
-        close(fd);
+    close(fd);
+	
 	add_diff_to_sum(diffTime, endTime, startTime);
 	return;
 }
@@ -889,29 +938,47 @@ void context_switch_test(struct timespec *diffTime) {
 
 int msg_size = -1;
 int curr_iter_limit = -1;
+#define sock_dir "/TEST_DIR/"
 #define sock "/TEST_DIR/socket"
+
+void printcwd(){
+	char buf[255];
+    getcwd(buf, sizeof(buf));
+    debug("current working directory : %s", buf);
+}
+
 void send_test(struct timespec *timeArray, int iter, int *i) {
+
+	if( access( sock, F_OK ) != -1 ) {
+		remove(sock);
+		info("Removed socket because of bad access: %s.", sock);
+	}
+
 	int retval;
 	int fds1[2], fds2[2];
 	retval = pipe(fds1);
-	if (retval != 0) printf("[error] failed to open pipe1.\n");
+	if (retval != 0) except("[error] failed to open pipe1.\n");
 	retval = pipe(fds2);
-	if (retval != 0) printf("[error] failed to open pipe1.\n");
+	if (retval != 0) except("[error] failed to open pipe1.\n");
+	// info("Successfully open pipes.");
+	
 	char w = 'b', r;	
 	
 	struct sockaddr_un server_addr;
 	memset(&server_addr, 0, sizeof(struct sockaddr_un));
 	server_addr.sun_family = AF_UNIX;
-	strncpy(server_addr.sun_path, home, sizeof(server_addr.sun_path) - 1); 
-	strncpy(server_addr.sun_path, sock, sizeof(server_addr.sun_path) - 1); 
-
+	
+	// Use a separate, stable path for the socket file.
+	strncat(server_addr.sun_path, sock, sizeof(server_addr.sun_path) - 1);
+	// debug("server_addr.sun_path=%s", server_addr.sun_path);
+	
 	int forkId = fork();
 
 	if (forkId < 0) {
-		printf("[error] fork failed.\n");
+		except("[error] fork failed.\n");
 		return;
 	}
-
+	
 	if (forkId == 0) {
 		close(fds1[0]);
 		close(fds2[1]);
@@ -920,12 +987,26 @@ void send_test(struct timespec *timeArray, int iter, int *i) {
 		socklen_t client_addr_len;
 	
 		int fd_server = socket(AF_UNIX, SOCK_STREAM, 0);
-		if (fd_server < 0) printf("[error] failed to open server socket.\n");
-	
+
+		if (fd_server < 0) {
+			except("[error] failed to open server socket.\n");
+		}
+		// info("Socket server opened: %d", fd_server);
+
+		// NOTE: Turn on If need to reuse the socket file
+		// if (setsockopt(fd_server, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0){
+		// 	except("setsockopt(SO_REUSEADDR) failed");
+		// }
+		
 		retval = bind(fd_server, (struct sockaddr *) &server_addr, sizeof(struct sockaddr_un));
-		if (retval == -1) printf("[error] failed to bind.\n");
+		if (retval == -1) {
+			except("[error] failed to bind: %s\n", server_addr.sun_path);
+		}
+
 		retval = listen(fd_server, 10); 
-		if (retval == -1) printf("[error] failed to listen.\n");
+		if (retval == -1) {
+			except("[error] failed to listen.\n");
+		}
 		if (DEBUG) printf("Waiting for connection\n");
 
 		write(fds1[1], &w, 1);
@@ -942,8 +1023,8 @@ void send_test(struct timespec *timeArray, int iter, int *i) {
 		close(fds2[0]);
 
 
-        	kill(getpid(),SIGINT);
-		printf("[error] unable to kill child process\n");
+        kill(getpid(),SIGINT);
+		except("[error] unable to kill child process\n");
 		return;
 
 	} else {
@@ -954,9 +1035,15 @@ void send_test(struct timespec *timeArray, int iter, int *i) {
 		read(fds1[0], &r, 1);
 
 		int fd_client = socket(AF_UNIX, SOCK_STREAM, 0);
-		if (fd_client < 0) printf("[error] failed to open client socket.\n");
+		if (fd_client < 0) {
+			except("[error] failed to open client socket.\n");
+		}
+		// debug("Socket client opened: %d", fd_client);
+
 		retval = connect(fd_client, (struct sockaddr *) &server_addr, sizeof(struct sockaddr_un));
-		if (retval == -1) printf("[error] failed to connect.\n");
+		if (retval == -1) {
+			except("[error] failed to connect.\n");
+		}
 
 		char *buf = (char *) malloc (sizeof(char) * msg_size);
 		for (int i = 0; i < msg_size; i++) {
@@ -972,7 +1059,7 @@ void send_test(struct timespec *timeArray, int iter, int *i) {
 			add_diff_to_sum(&timeArray[*i], endTime, startTime);
 
 			if (retval == -1) {
-				printf("[error] failed to send.\n");
+				except("failed to send.");
 			}
 		}
 
@@ -992,11 +1079,11 @@ void recv_test(struct timespec *timeArray, int iter, int *i) {
 	int fds1[2], fds2[2];
 	retval = pipe(fds1);
 	if (retval != 0) {
-		printf("[error] failed to open pipe1.\n");
+		except("[error] failed to open pipe1.\n");
 	}
 	retval = pipe(fds2);
 	if (retval != 0) {
-		printf("[error] failed to open pipe2.\n");
+		except("[error] failed to open pipe2.\n");
 	}
 	char w = 'b', r;	
 	
@@ -1008,7 +1095,7 @@ void recv_test(struct timespec *timeArray, int iter, int *i) {
 	int forkId = fork();
 
 	if (forkId < 0) {
-		printf("[error] fork failed.\n");
+		except("[error] fork failed.\n");
 		return;
 	}
 
@@ -1020,12 +1107,12 @@ void recv_test(struct timespec *timeArray, int iter, int *i) {
 		socklen_t client_addr_len;
 	
 		int fd_server = socket(AF_UNIX, SOCK_STREAM, 0);
-		if (fd_server < 0) printf("[error] failed to open server socket.\n");
+		if (fd_server < 0) except("[error] failed to open server socket.\n");
 	
 		retval = bind(fd_server, (struct sockaddr *) &server_addr, sizeof(struct sockaddr_un));
-		if (retval == -1) printf("[error] failed to bind.\n");
+		if (retval == -1) except("[error] failed to bind.\n");
 		retval = listen(fd_server, 10);
-		if (retval == -1) printf("[error] failed to listen.\n");
+		if (retval == -1) except("[error] failed to listen.\n");
 		if (DEBUG) printf("Waiting for connection\n");
 
 		write(fds1[1], &w, 1);
@@ -1049,7 +1136,7 @@ void recv_test(struct timespec *timeArray, int iter, int *i) {
 			add_diff_to_sum(&timeArray[*i], endTime, startTime);
 
 			if (retval == -1) {
-				printf("[error] failed to recv.\n");
+				except("[error] failed to recv.\n");
 			}
 		}
 
@@ -1071,9 +1158,9 @@ void recv_test(struct timespec *timeArray, int iter, int *i) {
 		read(fds1[0], &r, 1);
 
 		int fd_client = socket(AF_UNIX, SOCK_STREAM, 0);
-		if (fd_client < 0) printf("[error] failed to open client socket.\n");
+		if (fd_client < 0) except("[error] failed to open client socket.\n");
 		retval = connect(fd_client, (struct sockaddr *) &server_addr, sizeof(struct sockaddr_un));
-		if (retval == -1) printf("[error] failed to connect.\n");
+		if (retval == -1) except("[error] failed to connect.\n");
 
 		char *buf = (char *) malloc (sizeof(char) * msg_size);
 		for (int i = 0; i < msg_size; i++) {
@@ -1085,7 +1172,7 @@ void recv_test(struct timespec *timeArray, int iter, int *i) {
 			retval = syscall(SYS_sendto, fd_client, buf, msg_size, MSG_DONTWAIT, NULL, 0);
 
 			if (retval == -1) {
-				printf("[error] failed to send.\n");
+				except("[error] failed to send.\n");
 			}
 		}
 
@@ -1097,16 +1184,40 @@ void recv_test(struct timespec *timeArray, int iter, int *i) {
 		free(buf);
 
         	kill(getpid(),SIGINT);
-		printf("[error] unable to kill child process\n");
+		except("[error] unable to kill child process\n");
 		return;
 
 	}
 
 }
 
+
 int main(int argc, char *argv[])
 {
+	if (argc != 3){
+		printf("Invalid arguments, gave %d not 3\n",argc);
+		usage();
+		exit(1);
+	}
+
+	info("Attempt to get envion $LEBENCH_DIR");
 	home = getenv("LEBENCH_DIR");
+	if (!home || strlen(home) == 0){
+		printf("Env variable LEBENCH_DIR not found!\n");
+		usage();
+		exit(1);
+	}
+	debug("LEBENCH_DIR=%s", home);
+
+	// Create a TEST_DIR for socket
+	DIR* dir = opendir(sock_dir);
+	if (dir){
+		closedir(dir);
+	}else{
+		mkdir(sock_dir, 0755);
+		info("Created directory for socket testing: %s", sock_dir);
+	}
+
 	
 	output_fn = (char *)malloc(500*sizeof(char));
 	strcpy(output_fn, home);
@@ -1116,18 +1227,22 @@ int main(int argc, char *argv[])
 	strcpy(new_output_fn, home);
 	strcat(new_output_fn, NEW_OUTPUT_FN);
 
+	debug("Write output_fn to %s and new_output_fn to %s", output_fn, new_output_fn);
+
 	struct timespec startTime, endTime;
 	clock_gettime(CLOCK_MONOTONIC, &startTime);
-	if (argc != 3){printf("Invalid arguments, gave %d not 3",argc);return(0);}
+	
 	char *iteration = argv[1];
 	char *str_os_name = argv[2];
 	FILE *fp;
 	FILE *copy = NULL;
 	fp=fopen(new_output_fn,"w");
 	isFirstIteration = false;
+
 	if (*iteration == '0'){isFirstIteration = true;}
 	if (!isFirstIteration)
 	{
+		debug("Wait until the test file is written...");
 		copy=fopen(output_fn,"r");
 		char ch;
 		int increment = 0;
@@ -1144,6 +1259,7 @@ int main(int argc, char *argv[])
 			}
 			fputc(ch,fp);
 		}
+		debug("Test file write finished.");
 	}
 	else
 	{
@@ -1151,13 +1267,13 @@ int main(int argc, char *argv[])
 	}
 	fprintf(fp,"%s,\n",str_os_name);
 	
-	testInfo info;	
+	testInfo info;
 
 	/*****************************************/
 	/*               GETPID                  */
 	/*****************************************/
-
-	sleep(60);
+	// info("Sleep 60 seconds to get the process priority");
+	// sleep(60);
 	info.iter = BASE_ITER * 100;
 	info.name = "ref";
 	one_line_test(fp, copy, ref_test, &info);
@@ -1171,7 +1287,6 @@ int main(int argc, char *argv[])
 	info.name = "getpid";
 	one_line_test(fp, copy, getpid_test, &info);
 
-
 	
 	/*****************************************/
 	/*            CONTEXT SWITCH             */
@@ -1184,6 +1299,7 @@ int main(int argc, char *argv[])
 	/*****************************************/
 	/*             SEND & RECV               */
 	/*****************************************/
+
 	msg_size = 1;	
 	curr_iter_limit = 50;
 	printf("msg size: %d.\n", msg_size);
@@ -1195,8 +1311,8 @@ int main(int argc, char *argv[])
 	info.iter = BASE_ITER * 10;
 	info.name = "recv";
 	one_line_test_v2(fp, copy, recv_test, &info);
-	
 
+	
 	msg_size = 96000;	// This size 96000 would cause blocking on older kernels!
 	curr_iter_limit = 1;
 	printf("msg size: %d.\n", msg_size);
@@ -1208,11 +1324,12 @@ int main(int argc, char *argv[])
 	info.iter = BASE_ITER;
 	info.name = "big recv";
 	one_line_test_v2(fp, copy, recv_test, &info);
-	
+
 
 	/*****************************************/
 	/*         FORK & THREAD CREATE          */
 	/*****************************************/
+	printf("[INFO] fork & thread Test Start");
 	info.iter = BASE_ITER * 2;
 	info.name = "fork";
 	two_line_test(fp, copy, forkTest, &info);
@@ -1255,6 +1372,8 @@ int main(int argc, char *argv[])
 	/*****************************************/
 	/*     WRITE & READ & MMAP & MUNMAP      */
 	/*****************************************/
+	
+	printf("[INFO] write & read & mmap & munmap Test Start");
 
 	/****** SMALL ******/
 	file_size = PAGE_SIZE;	
@@ -1358,6 +1477,7 @@ int main(int argc, char *argv[])
 	/*****************************************/
 	/*              WRITE & READ             */
 	/*****************************************/
+	printf("[INFO] write & read (select, poll, epoll) Test Start");
 
 	/****** SMALL ******/
 	fd_count = 10;
@@ -1409,4 +1529,9 @@ int main(int argc, char *argv[])
 	printf("Test took: %ld.%09ld seconds\n",diffTime->tv_sec, diffTime->tv_nsec); 
 	free(diffTime);
 	return(0);
+
+	checkpoint("Reached line: %s::%d", __FILE__, __LINE__);
+	quit();
+	
+
 }
