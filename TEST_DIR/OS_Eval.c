@@ -36,25 +36,33 @@
 // Yellow Font: \e[0;33m 
 // Green Font: \e[0;32m
 // Blue Font: \e[0;34m
+
+void usage(){
+	printf("Usage:\n");
+	// printf("cd /LEBench/TEST_DIR && make && LEBENCH_DIR=/LEBench/ PATH=/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin sudo OS_Eval 0 4.12.0-custom\n");
+	// printf("cd /LEBench/TEST_DIR && make && LEBENCH_DIR=/LEBench/ PATH=/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin sudo OS_Eval 0 4.15.0-101-generic\n");
+	printf("cd /LEBench/TEST_DIR && make && LEBENCH_DIR=/LEBench/ PATH=/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin sudo ./OS_Eval 0 $(uname -r)\n");
+}
+
+
+#define debug(...) {}
+#define info(...) {}
+#define checkpoint(...) {}
+#define quit(...) {}
+
+/****
 #define debug(...) {printf("\e[0;33m[DEBUG] [%s::%d] ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\e[0m \n");};
 
 #define info(...) {printf("\e[0;32m[INFO] [%s::%d] ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\e[0m \n");};
 
 #define checkpoint(...) {printf("\e[0;35m[CHECK] [%s::%d] ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\e[0m \n");};
 
-void usage(){
-	printf("Usage:\n");
-	printf(" LEBENCH_DIR=/LEBench/ PATH=/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin /LEBench/TEST_DIR/OS_Eval 0 4.12.0-custom\n");
-	printf(" LEBENCH_DIR=/LEBench/ PATH=/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin /LEBench/TEST_DIR/OS_Eval 0 4.4.0-generic\n");
-}
-
-void quit(){
-	
-}
-
 #define quit() {printf("\e[0;36m[EXIT] [%s::%d] ====== Reached the end of debug ======\e[0m\n", __FILE__, __LINE__); exit(1);}
 
+****/
+
 #define except(...) {printf("\e[0;31m[ERROR][%s::%d]", __FILE__, __LINE__); perror(""); printf(__VA_ARGS__); printf("\e[0m \n"); exit(1);};
+
 
 /*******************************************/
 
@@ -279,7 +287,7 @@ void one_line_test(FILE *fp, FILE *copy, void (*f)(struct timespec*), testInfo *
 		(*f)(&timeArray[i]);
 
 		if (i == 0){
-			info("[%s] Sample time: %ld",info->name, timeArray[i].tv_sec);
+			info("[%s] Sample time: %ld.%ld",info->name, timeArray[i].tv_sec, timeArray[i].tv_nsec);
 		}
 		if((i / runs) > bound){
 			info("[%s] %d/%d Iteration done...", info->name, i, runs);
@@ -969,7 +977,8 @@ void send_test(struct timespec *timeArray, int iter, int *i) {
 	server_addr.sun_family = AF_UNIX;
 	
 	// Use a separate, stable path for the socket file.
-	strncat(server_addr.sun_path, sock, sizeof(server_addr.sun_path) - 1);
+	// strncpy(server_addr.sun_path, home, sizeof(server_addr.sun_path) - 1);
+	strncpy(server_addr.sun_path, sock, sizeof(server_addr.sun_path) - 1);
 	// debug("server_addr.sun_path=%s", server_addr.sun_path);
 	
 	int forkId = fork();
@@ -984,7 +993,7 @@ void send_test(struct timespec *timeArray, int iter, int *i) {
 		close(fds2[1]);
 
 		struct sockaddr_un client_addr;
-		socklen_t client_addr_len;
+		socklen_t client_addr_len = 0;
 	
 		int fd_server = socket(AF_UNIX, SOCK_STREAM, 0);
 
@@ -1012,7 +1021,11 @@ void send_test(struct timespec *timeArray, int iter, int *i) {
 		write(fds1[1], &w, 1);
 
 		int fd_connect = accept(fd_server, (struct sockaddr *) &client_addr, &client_addr_len);
+		if (fd_connect < 0){
+			except("send::Failed to accept");
+		}
 		if (DEBUG) printf("Connection accepted.\n");
+		// debug("child connected");
 
 		read(fds2[0], &r, 1);
 
@@ -1044,6 +1057,7 @@ void send_test(struct timespec *timeArray, int iter, int *i) {
 		if (retval == -1) {
 			except("[error] failed to connect.\n");
 		}
+		// debug("parent connected");
 
 		char *buf = (char *) malloc (sizeof(char) * msg_size);
 		for (int i = 0; i < msg_size; i++) {
@@ -1075,6 +1089,12 @@ void send_test(struct timespec *timeArray, int iter, int *i) {
 }
 
 void recv_test(struct timespec *timeArray, int iter, int *i) {
+
+	if( access( sock, F_OK ) != -1 ) {
+		remove(sock);
+		info("Removed socket because of bad access: %s.", sock);
+	}
+
 	int retval;
 	int fds1[2], fds2[2];
 	retval = pipe(fds1);
@@ -1086,6 +1106,7 @@ void recv_test(struct timespec *timeArray, int iter, int *i) {
 		except("[error] failed to open pipe2.\n");
 	}
 	char w = 'b', r;	
+
 	
 	struct sockaddr_un server_addr;
 	memset(&server_addr, 0, sizeof(struct sockaddr_un));
@@ -1104,7 +1125,7 @@ void recv_test(struct timespec *timeArray, int iter, int *i) {
 		close(fds2[1]);
 
 		struct sockaddr_un client_addr;
-		socklen_t client_addr_len;
+		socklen_t client_addr_len = 0;
 	
 		int fd_server = socket(AF_UNIX, SOCK_STREAM, 0);
 		if (fd_server < 0) except("[error] failed to open server socket.\n");
@@ -1118,6 +1139,9 @@ void recv_test(struct timespec *timeArray, int iter, int *i) {
 		write(fds1[1], &w, 1);
 
 		int fd_connect = accept(fd_server, (struct sockaddr *) &client_addr, &client_addr_len);
+		if (fd_connect < 0) {
+			except("recv::Failed to accept");
+		}
 		if (DEBUG) printf("Connection accepted.\n");
 
 		read(fds2[0], &r, 1);
@@ -1287,13 +1311,6 @@ int main(int argc, char *argv[])
 	info.name = "getpid";
 	one_line_test(fp, copy, getpid_test, &info);
 
-	
-	/*****************************************/
-	/*            CONTEXT SWITCH             */
-	/*****************************************/
-	info.iter = BASE_ITER * 10;
-	info.name = "context siwtch";
-	one_line_test(fp, copy, context_switch_test, &info);
 
 
 	/*****************************************/
@@ -1312,7 +1329,6 @@ int main(int argc, char *argv[])
 	info.name = "recv";
 	one_line_test_v2(fp, copy, recv_test, &info);
 
-	
 	msg_size = 96000;	// This size 96000 would cause blocking on older kernels!
 	curr_iter_limit = 1;
 	printf("msg size: %d.\n", msg_size);
@@ -1324,6 +1340,15 @@ int main(int argc, char *argv[])
 	info.iter = BASE_ITER;
 	info.name = "big recv";
 	one_line_test_v2(fp, copy, recv_test, &info);
+
+	// quit();
+
+	/*****************************************/
+	/*            CONTEXT SWITCH             */
+	/*****************************************/
+	info.iter = BASE_ITER * 10;
+	info.name = "context siwtch";
+	one_line_test(fp, copy, context_switch_test, &info);
 
 
 	/*****************************************/
