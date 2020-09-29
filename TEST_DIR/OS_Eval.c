@@ -1215,6 +1215,14 @@ void recv_test(struct timespec *timeArray, int iter, int *i) {
 
 }
 
+char * gettime(){
+    char * s = (char *) (calloc(128, sizeof(char)));
+    time_t t = time(NULL);
+    struct tm *tm = localtime(&t);
+    strftime(s, 128, "%m%d_%H%M%S", tm);
+    return s;
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -1542,11 +1550,16 @@ int main(int argc, char *argv[])
 		remove(output_fn);
 	}
 	char name[300];
+	char * current_time = gettime();
+
 	strcpy(name, home);
 	strcat(name, OUTPUT_FILE_PATH);
 	strcat(name, "output.");
 	strcat(name, str_os_name);
+	strcat(name, ".");
+	strcat(name, current_time);
 	strcat(name, ".csv");
+	
 	strcat(name, "\0");
 	int ret = rename(new_output_fn,name);
 	clock_gettime(CLOCK_MONOTONIC, &endTime);
