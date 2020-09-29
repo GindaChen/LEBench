@@ -273,7 +273,7 @@ void one_line_test(FILE *fp, FILE *copy, void (*f)(struct timespec*), testInfo *
 	struct timespec testStart, testEnd;
 	clock_gettime(CLOCK_MONOTONIC,&testStart);
 
-	info("Performing test %s.\n", info->name);
+	printf("[INFO] Start test: %s.\n", info->name);
 
 	int runs = info->iter;
 	info("Total test iteration %d.\n", runs);
@@ -347,7 +347,7 @@ void one_line_test_v2(FILE *fp, FILE *copy, void (*f)(struct timespec*, int, int
 	struct timespec testStart, testEnd;
 	clock_gettime(CLOCK_MONOTONIC,&testStart);
 
-	printf("Performing test %s.\n", info->name);
+	printf("[INFO] Start test: %s.\n", info->name);
 
 	int runs = info->iter;
 	printf("Total test iteration %d.\n", runs);
@@ -414,7 +414,7 @@ void one_line_test_v2(FILE *fp, FILE *copy, void (*f)(struct timespec*, int, int
 void two_line_test(FILE *fp, FILE *copy, void (*f)(struct timespec*,struct timespec*), testInfo *info){
 	struct timespec testStart, testEnd;
 	clock_gettime(CLOCK_MONOTONIC,&testStart);
-	printf("Performing test %s.\n", info->name);
+	printf("[INFO] Start test: %s.\n", info->name);
 
 	int runs = info->iter;
 	printf("Total test iteration %d.\n", runs);
@@ -1564,8 +1564,11 @@ int main(int argc, char *argv[])
 	int ret = rename(new_output_fn,name);
 	clock_gettime(CLOCK_MONOTONIC, &endTime);
 	struct timespec *diffTime = calc_diff(&startTime, &endTime);
-	printf("Test took: %ld.%09ld seconds\n",diffTime->tv_sec, diffTime->tv_nsec); 
+	printf("Test completed in %ld.%09ld seconds.\n",diffTime->tv_sec, diffTime->tv_nsec); 
 	free(diffTime);
+	free(current_time);
+	
+	printf("Wrote output file to %s\n", name);
 	return(0);
 
 	checkpoint("Reached line: %s::%d", __FILE__, __LINE__);
