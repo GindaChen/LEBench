@@ -1,5 +1,16 @@
 # LEBench
 
+### Download linux kernel
+
+```
+git clone git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
+git checkout v4.12
+make menuconfig
+make -j `getconf _NPROCESSORS_ONLN` deb-pkg LOCALVERSION=-patch
+make -j `getconf _NPROCESSORS_ONLN` deb-pkg LOCALVERSION=-config
+sudo dpkg -i *.deb
+```
+
 ### Setup without cronjob
 
 Install the `/LEBench` in the root directory and do the following:
