@@ -1,0 +1,25 @@
+title,4.12,4.15
+contextswitch,-6,44
+small-read,11 ,98
+med-read,9 ,16
+big-read,72 ,75
+small-write,-4 ,46
+med-write,-8 ,0
+big-write,-1 ,0
+mmap,14,147
+small-munmap,9 ,94
+med-munmap,4 ,73
+big-munmap,-1 ,-7
+fork,0,14
+big-fork,37 ,50
+thrcreate,3 ,46
+send & recv,3 ,90
+big-send & recv,-1 ,4
+select,-2 ,115
+poll,-3 ,144
+epoll,-2 ,145
+big-select,41 ,118
+big-poll,39 ,114
+big-epoll,42 ,128
+small-pagefault,2 ,54
+big-pagefault,-14,9
